@@ -1,0 +1,21 @@
+<!-- scraper/templates/scraper/ad_list.html -->
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8" />
+        <title>Classified Ads</title>
+    </head>
+    <body>
+        <h1>Latest Classified Ads</h1>
+        <ul>
+            {% for ad in ads %}
+            <li>
+                <strong>{{ ad.title }}</strong> - {{ ad.price }}<br />
+                <a href="{{ ad.link }}" target="_blank">View Ad</a>
+            </li>
+            {% empty %}
+            <li>No ads found.</li>
+            {% endfor %}
+        </ul>
+    </body>
+</html>
