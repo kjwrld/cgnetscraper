@@ -31,6 +31,7 @@ class Command(BaseCommand):
         max_pages = options.get("pages", 15)
         base_url = "https://caguns.net"
         ads_found = 0
+        new_ads_messages = []
 
         # Create the cloudscraper scraper to handle potential Cloudflare protections.
         scraper = cloudscraper.create_scraper()
@@ -162,8 +163,7 @@ class Command(BaseCommand):
                         ads_found += 1
                         self.stdout.write(f"Added ad: {title}")
 
-                        if notify:
-                            send_text_notification(title, price, link)
+                        new_ads_messages.append(f"Title: {title}\nPrice: {price}\nLink: {link}\n")
                     else:
                         self.stdout.write(f"Ad already exists: {title}")
                 else:
@@ -171,5 +171,10 @@ class Command(BaseCommand):
 
             # Pause between pages to avoid overwhelming the server.
             time.sleep(1)
+
+        if notify and new_ads_messages:
+            message_body = "New Classified Ad Alerts:\n\n" + "\n".join(new_ads_messages)
+            send_text_notification(message_body)
+            self.stdout.write("Sent consolidated text notification.")
 
         self.stdout.write(f"\nScraping complete. {ads_found} new ad(s) added.")
