@@ -153,6 +153,7 @@ class Command(BaseCommand):
 
                 # Only create the ad if title and link were successfully extracted.
                 if title and link:
+                    # need to check link for https://caguns.net/classifieds/?prefix_id
                     if not ClassifiedAd.objects.filter(link=link).exists():
                         ClassifiedAd.objects.create(
                             title=title,
@@ -172,6 +173,7 @@ class Command(BaseCommand):
             # Pause between pages to avoid overwhelming the server.
             time.sleep(1)
 
+        # waiting for twilio clearance
         if notify and new_ads_messages:
             message_body = "New Classified Ad Alerts:\n\n" + "\n".join(new_ads_messages)
             send_text_notification(message_body)
