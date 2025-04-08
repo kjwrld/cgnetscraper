@@ -11,9 +11,24 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
 from pathlib import Path
+import os
+import environ
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Initialise environment variables
+env = environ.Env(
+    DEBUG=(bool, False)
+)
+# reading .env file
+environ.Env.read_env(os.path.join(BASE_DIR, '.env'))
+
+TWILIO_ACCOUNT_SID           = env('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN            = env('TWILIO_AUTH_TOKEN')
+TWILIO_MESSAGING_SERVICE_SID = env('TWILIO_MESSAGING_SERVICE_SID')
+TWILIO_PHONE_NUMBER          = env('TWILIO_PHONE_NUMBER')
+NOTIFICATION_PHONE_NUMBER    = env('NOTIFICATION_PHONE_NUMBER')
 
 
 # Quick-start development settings - unsuitable for production
@@ -122,3 +137,4 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+

@@ -1,66 +1,128 @@
 # scraper/management/commands/scrape_ads.py
 
-import cloudscraper  # helps bypass Cloudflare if needed
+import time
+from urllib.parse import urlencode, urljoin
+import cloudscraper
 from bs4 import BeautifulSoup
 from django.core.management.base import BaseCommand
 from scraper.models import ClassifiedAd
-
+from scraper.utils import send_text_notification
 class Command(BaseCommand):
-    help = "Scrape classified gun ads from caguns.net for NORCAL ads using updated selectors"
+    help = "Scrape classified gun ads from caguns.net for NORCAL ads using updated selectors."
+
+    def add_arguments(self, parser):
+        # Flag to control text notifications.
+        parser.add_argument(
+            "--notify",
+            action="store_true",
+            help="Send text notifications when new ads are scraped."
+        )
+        # Flag for the number of pages to scrape.
+        parser.add_argument(
+            "--pages",
+            type=int,
+            default=10,
+            help="Number of pages to scrape (default: 10)"
+        )
 
     def handle(self, *args, **options):
-        url = "https://caguns.net/classifieds/?filter=norcal&sort=create_date"
-        self.stdout.write(f"Fetching {url}...")
-
-        # Use cloudscraper to handle potential Cloudflare protections.
-        scraper = cloudscraper.create_scraper()
-        response = scraper.get(url)
-        self.stdout.write(f"Response status: {response.status_code}")
-        if response.status_code != 200:
-            self.stdout.write("Error fetching the site")
-            return
-
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        # Find the main container holding the gun ads.
-        container = soup.find("div", class_="structItemContainerCasListView")
-        if not container:
-            self.stdout.write("No ad container found")
-            return
-
+        notify = options.get("notify", False)
+        max_pages = options.get("pages", 10)
+        base_url = "https://caguns.net"
         ads_found = 0
-        # Find all ad items within the container. We use a lambda to match classes containing "structItem--ad".
-        ad_items = container.find_all("div", class_=lambda value: value and "structItem--ad" in value)
-        for ad in ad_items:
-            # Within each ad, find the cell that contains the main information.
-            main_cell = ad.find("div", class_="structItem-cell--main")
-            if not main_cell:
+
+        # Create the cloudscraper scraper to handle potential Cloudflare protections.
+        scraper = cloudscraper.create_scraper()
+
+        # Loop over each page.
+        for page in range(1, max_pages + 1):
+            # Build URL with appropriate query parameters.
+            params = {
+                "filter": "norcal",
+                "sort": "create_date",
+                "page": page
+            }
+            url = f"{base_url}/classifieds/?{urlencode(params)}"
+            self.stdout.write(f"\nFetching page {page}: {url}...")
+            
+            response = scraper.get(url)
+            self.stdout.write(f"Response status: {response.status_code}")
+
+            if response.status_code != 200:
+                self.stdout.write(f"Error fetching page {page}")
                 continue
 
-            # Extract the title.
-            title_div = main_cell.find("div", class_="structItem-title")
-            title = title_div.get_text(strip=True) if title_div else "No Title"
-            # Usually the title contains a link.
-            link_tag = title_div.find("a", href=True) if title_div else None
-            link = link_tag["href"] if link_tag else None
+            soup = BeautifulSoup(response.text, "html.parser")
+            
+            # Locate the container that holds all the listings.
+            container = soup.find("div", class_=lambda x: x and "structItemContainerCasListView" in x)
+            if not container:
+                self.stdout.write("Could not find the ad container on this page")
+                continue
+            else:
+                count = len(container.find_all("div", class_=lambda x: x and "structItem--ad" in x))
+                self.stdout.write(f"Found {count} ad element(s) on page {page}")
 
-            # Extract the description.
-            # description_div = main_cell.find("div", class_="structItem-adDescription")
-            # description = description_div.get_text(strip=True) if description_div else ""
+            # Iterate over all individual ad containers.
+            for ad in container.find_all("div", class_=lambda x: x and "structItem--ad" in x):
+                cell = ad.find("div", class_="structItem-cell structItem-cell--main structItem-cell--listViewLayout")
+                if not cell:
+                    self.stdout.write("Cell not found; skipping ad.")
+                    continue
 
-            # Extract the price.
-            price_div = main_cell.find("div", class_="structItem-adPrice")
-            price = price_div.get_text(strip=True) if price_div else ""
+                # --- TITLE & LINK EXTRACTION ---
+                title_div = cell.find("div", class_="structItem-title")
+                title = ""
+                link = ""
+                if title_div:
+                    a_tags = title_div.find_all("a")
+                    # Usually, the first <a> is the label and the second contains the actual title.
+                    if len(a_tags) >= 2:
+                        title_a = a_tags[1]
+                    elif a_tags:
+                        title_a = a_tags[0]
+                    else:
+                        title_a = None
 
-            # Only add the ad if we have a valid link and it isn't already in the database.
-            if link and not ClassifiedAd.objects.filter(link=link).exists():
-                ClassifiedAd.objects.create(
-                    title=title,
-                    price=price,
-                    # description=description,l
-                    link=link
-                )
-                ads_found += 1
-                self.stdout.write(f"Added ad: {title}")
+                    if title_a:
+                        title = title_a.get_text(strip=True)
+                        relative_link = title_a.get("href", "")
+                        link = urljoin(base_url, relative_link)
+                    else:
+                        self.stdout.write("Title anchor not found for an ad.")
+                else:
+                    self.stdout.write("Title container not found for an ad.")
 
-        self.stdout.write(f"Scraping complete. {ads_found} new ad(s) added.")
+                # --- DESCRIPTION EXTRACTION ---
+                desc_tag = cell.find("div", class_="structItem-adDescription")
+                description = desc_tag.get_text(strip=True) if desc_tag else ""
+
+                # --- PRICE EXTRACTION ---
+                price_tag = cell.find("div", class_="structItem-adPrice")
+                price = price_tag.get_text(strip=True) if price_tag else ""
+
+                self.stdout.write(f"Extracted: title='{title}', price='{price}', link='{link}'")
+
+                # Only create the ad if title and link were successfully extracted.
+                if title and link:
+                    if not ClassifiedAd.objects.filter(link=link).exists():
+                        ClassifiedAd.objects.create(
+                            title=title,
+                            description=description,
+                            price=price,
+                            link=link
+                        )
+                        ads_found += 1
+                        self.stdout.write(f"Added ad: {title}")
+
+                        if notify:
+                            send_text_notification(title, price, link)
+                    else:
+                        self.stdout.write(f"Ad already exists: {title}")
+                else:
+                    self.stdout.write("Incomplete data; ad skipped.")
+
+            # Pause between pages to avoid overwhelming the server.
+            time.sleep(1)
+
+        self.stdout.write(f"\nScraping complete. {ads_found} new ad(s) added.")
