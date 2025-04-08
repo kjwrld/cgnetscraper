@@ -6,10 +6,12 @@ class ClassifiedAd(models.Model):
     link = models.URLField(unique=True)
     description = models.TextField(blank=True, null=True)
     image_url = models.URLField(blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    posted_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(null=True, blank=True)
+    scraped_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-created_at']  # This will order the ads so that the most recent are first
+        ordering = ['-updated_at']
 
     def __str__(self):
         return self.title

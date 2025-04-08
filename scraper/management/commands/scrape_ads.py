@@ -3,6 +3,7 @@
 import time
 from urllib.parse import urlencode, urljoin
 import cloudscraper
+from dateutil.parser import parse as parse_datetime
 from bs4 import BeautifulSoup
 from django.core.management.base import BaseCommand
 from scraper.models import ClassifiedAd
@@ -21,13 +22,13 @@ class Command(BaseCommand):
         parser.add_argument(
             "--pages",
             type=int,
-            default=10,
+            default=15,
             help="Number of pages to scrape (default: 10)"
         )
 
     def handle(self, *args, **options):
         notify = options.get("notify", False)
-        max_pages = options.get("pages", 10)
+        max_pages = options.get("pages", 15)
         base_url = "https://caguns.net"
         ads_found = 0
 
@@ -70,6 +71,29 @@ class Command(BaseCommand):
                     self.stdout.write("Cell not found; skipping ad.")
                     continue
 
+                # --- REGION & SUB-REGION EXTRACTION ---
+                region = ""
+                sub_region = ""
+                custom_fields_div = cell.find("div", class_="structItem-adCustomFields")
+                if custom_fields_div:
+                    fields_div = custom_fields_div.find("div", class_=lambda x: x and "listViewLayout-fields" in x)
+                    if fields_div:
+                        region_dl = fields_div.find("dl", {"data-field": "region"})
+                        sub_region_dl = fields_div.find("dl", {"data-field": "sub_region"})
+                        if region_dl:
+                            region_dd = region_dl.find("dd")
+                            if region_dd:
+                                region = region_dd.get_text(strip=True)
+                        if sub_region_dl:
+                            sub_region_dd = sub_region_dl.find("dd")
+                            if sub_region_dd:
+                                sub_region = sub_region_dd.get_text(strip=True)
+
+                # Only proceed if region is "NorCal" and sub_region is "Bay Area".
+                if region.lower() != "norcal" or sub_region.lower() != "bay area":
+                    self.stdout.write(f"Ad skipped due to region mismatch: region='{region}', sub_region='{sub_region}'")
+                    continue
+
                 # --- TITLE & LINK EXTRACTION ---
                 title_div = cell.find("div", class_="structItem-title")
                 title = ""
@@ -100,8 +124,31 @@ class Command(BaseCommand):
                 # --- PRICE EXTRACTION ---
                 price_tag = cell.find("div", class_="structItem-adPrice")
                 price = price_tag.get_text(strip=True) if price_tag else ""
+                
+                # --- DATE EXTRACTION ---
+                # Extract the posted date (created date) from the createdate element.
+                posted_at = None
+                created_dl = cell.find("dl", class_=lambda x: x and "structItem-metaItem--createdate" in x)
+                if created_dl:
+                    time_tag = created_dl.find("time", class_="u-dt")
+                    if time_tag and time_tag.has_attr("datetime"):
+                        try:
+                            posted_at = parse_datetime(time_tag["datetime"])
+                        except Exception as e:
+                            self.stdout.write(f"Error parsing posted_at: {e}")
 
-                self.stdout.write(f"Extracted: title='{title}', price='{price}', link='{link}'")
+                # Extract the updated date from the lastUpdate element.
+                updated_at = None
+                update_dl = cell.find("dl", class_=lambda x: x and "structItem-metaItem--lastUpdate" in x)
+                if update_dl:
+                    time_tag = update_dl.find("time", class_="u-dt")
+                    if time_tag and time_tag.has_attr("datetime"):
+                        try:
+                            updated_at = parse_datetime(time_tag["datetime"])
+                        except Exception as e:
+                            self.stdout.write(f"Error parsing updated_at: {e}")
+
+                self.stdout.write(f"Extracted: title='{title}', price='{price}', link='{link}', posted_at='{posted_at}', updated_at='{updated_at}'")
 
                 # Only create the ad if title and link were successfully extracted.
                 if title and link:
